@@ -50,11 +50,11 @@ func main() {
 	defer rows.Close()
 
 	if rows.Next() {
-		fmt.Println("found a record in the table")
+		fmt.Println("found a record in the table HOORAY")
 	}
 
 	fmt.Println("Server on 5432")
-	log.Fatal(http.ListenAndServe(":5432", nil))
+	log.Fatal(http.ListenAndServe(":8080", nil))
 
 }
 
@@ -62,9 +62,9 @@ func setupDB() (*sql.DB, error) {
 	/*
 		table name is list
 		database name is todoapi
-		host is from cat /etc/resolv.conf
+		host is from cat /etc/resolv.conf if via ip
 	*/
-	connStr := "host=localhost port=5432 user=postgres password=123 dbname=todoapi sslmode=disable"
+	connStr := "host=localhost port=5432 user=irkcat password=123 dbname=todoapi sslmode=disable"
 	return sql.Open("postgres", connStr)
 }
 
