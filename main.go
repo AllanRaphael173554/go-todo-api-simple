@@ -12,13 +12,13 @@ import (
 )
 
 type Item struct {
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	Description string    `json:"desc"`
-	StatusField string    `json:"status"`
-	DueDate     time.Time `json:"due_date"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string     `json:"id"`
+	Title       string     `json:"title"`
+	Description string     `json:"desc"`
+	StatusField string     `json:"status"`
+	DueDate     *time.Time `json:"due_date"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 func main() {
@@ -42,7 +42,7 @@ func main() {
 
 	})
 
-	// simple query
+	/* simple query
 	rows, err := db.Query("SELECT * FROM list LIMIT 1")
 	if err != nil {
 		log.Fatal("Query failed:", err)
@@ -51,19 +51,20 @@ func main() {
 
 	if rows.Next() {
 		fmt.Println("found a record in the table HOORAY")
-	}
+	} */
 
 	fmt.Println("Server on 5432")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 
 }
 
+/*
+table name is list
+database name is todoapi
+host is from cat /etc/resolv.conf if via ip
+*/
 func setupDB() (*sql.DB, error) {
-	/*
-		table name is list
-		database name is todoapi
-		host is from cat /etc/resolv.conf if via ip
-	*/
+
 	connStr := "host=localhost port=5432 user=irkcat password=123 dbname=todoapi sslmode=disable"
 	return sql.Open("postgres", connStr)
 }
@@ -103,7 +104,37 @@ func handleItems(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(items)
 
 	case "POST":
-
+		var item Item
+		if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		query := `
+		INSERT INTO list (title, description, status, due_date)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, title, description, status, due_date, created_at, updated_at
+		`
+		err := db.QueryRow(
+			query,
+			item.Title,
+			item.Description,
+			item.StatusField,
+			item.DueDate,
+		).Scan(
+			&item.ID,
+			&item.Title,
+			&item.Description,
+			&item.StatusField,
+			&item.DueDate,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(item)
 	case "PUT":
 
 	case "DELETE":
