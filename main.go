@@ -60,7 +60,7 @@ func main() {
 		fmt.Println("found a record in the table HOORAY")
 	} */
 
-	fmt.Println("Server on 5432")
+	fmt.Println("Server on 8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 
 }
@@ -136,6 +136,23 @@ func handleItems(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+
+		if item.Title == "" {
+			http.Error(w, "Title required", http.StatusBadRequest)
+			return
+		}
+
+		if item.Description == "" {
+			http.Error(w, "Description Required", http.StatusBadRequest)
+		}
+
+		if item.DueDate != nil {
+			if item.DueDate.Before(time.Now()) {
+				http.Error(w, "Due date cannot be in the past", http.StatusBadRequest)
+				return
+			}
+		}
+
 		query := `
 		INSERT INTO list (title, description, status, due_date)
 		VALUES ($1, $2, $3, $4)
@@ -175,13 +192,32 @@ func handleItems(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+
+		if item.DueDate != nil {
+			if item.DueDate.Before(time.Now()) {
+				http.Error(w, "Due date cannot be in past", http.StatusBadRequest)
+				return
+			}
+		}
+
+		var exists bool
+		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM list WHERE id = $1)", id).Scan(&exists)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !exists {
+			http.Error(w, "Item not found", http.StatusNotFound)
+			return
+		}
+
 		query := `
         UPDATE list 
         SET title = $1, description = $2, status = $3, due_date = $4, updated_at = NOW()
         WHERE id = $5
         RETURNING id, title, description, status, due_date, created_at, updated_at`
 
-		err := db.QueryRow(
+		err = db.QueryRow(
 			query,
 			item.Title,
 			item.Description,
