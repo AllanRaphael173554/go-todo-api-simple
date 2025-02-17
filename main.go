@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -35,7 +36,13 @@ func main() {
 	}
 	fmt.Println("Connection success")
 
-	// setup handler
+	// setup handlers
+
+	http.HandleFunc("/list/", func(w http.ResponseWriter, r *http.Request) {
+
+		handleItems(db, w, r)
+	})
+
 	http.HandleFunc("/list", func(w http.ResponseWriter, r *http.Request) {
 
 		handleItems(db, w, r)
@@ -63,8 +70,8 @@ table name is list
 database name is todoapi
 host is from cat /etc/resolv.conf if via ip
 */
-func setupDB() (*sql.DB, error) {
 
+func setupDB() (*sql.DB, error) {
 	connStr := "host=localhost port=5432 user=irkcat password=123 dbname=todoapi sslmode=disable"
 	return sql.Open("postgres", connStr)
 }
@@ -76,7 +83,27 @@ func handleItems(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	// to-do, doing, completed as status
 	switch r.Method {
 	case "GET":
-		rows, err := db.Query("SELECT * FROM list")
+
+		sortBy := r.URL.Query().Get("sort")
+		orderBy := r.URL.Query().Get("order")
+
+		if orderBy == "" {
+			orderBy = "ASC"
+		}
+
+		query := "SELECT * FROM list"
+		switch sortBy {
+		case "status":
+			query += " ORDER BY status " + orderBy
+		case "due_date":
+			query += " ORDER BY due_date " + orderBy
+		case "created_at":
+			query += " ORDER BY created_at " + orderBy
+		default:
+			query += " ORDER BY created_at	" + orderBy
+		}
+
+		rows, err := db.Query(query)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -135,9 +162,77 @@ func handleItems(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(item)
+
 	case "PUT":
+		id := strings.TrimPrefix(r.URL.Path, "/list/")
+		if id == "" {
+			http.Error(w, "ID is required", http.StatusBadRequest)
+			return
+		}
+
+		var item Item
+		if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		query := `
+        UPDATE list 
+        SET title = $1, description = $2, status = $3, due_date = $4, updated_at = NOW()
+        WHERE id = $5
+        RETURNING id, title, description, status, due_date, created_at, updated_at`
+
+		err := db.QueryRow(
+			query,
+			item.Title,
+			item.Description,
+			item.StatusField,
+			item.DueDate,
+			id,
+		).Scan(
+			&item.ID,
+			&item.Title,
+			&item.Description,
+			&item.StatusField,
+			&item.DueDate,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		)
+
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		json.NewEncoder(w).Encode(item)
 
 	case "DELETE":
+
+		id := strings.TrimPrefix(r.URL.Path, "/list/")
+		fmt.Printf("Attempting to delete ID: %s\n", id)
+
+		if id == "" {
+			http.Error(w, "UUID is required", http.StatusBadRequest)
+			return
+		}
+
+		result, err := db.Exec("DELETE FROM list WHERE id = $1", id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if rowsAffected == 0 {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
 
 	}
 }
