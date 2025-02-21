@@ -1,5 +1,23 @@
 package main
 
+/* test package golang
+split the the code into multiple files
+- main.go
+- db.go
+- handlers.go
+- item.go
+- routes.go
+- utils.go
+add additional features from the test
+- filter by status and due date
+- sort by status, due date, created_at
+- partial update
+- delete
+- error handling
+- validation
+- unit tests
+
+*/
 import (
 	"database/sql"
 	"encoding/json"
@@ -9,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 )
 
@@ -23,6 +42,7 @@ type Item struct {
 }
 
 func main() {
+	// setup database
 	db, err := setupDB()
 	if err != nil {
 		log.Fatal("Failled to establish connection: ", err)
@@ -37,16 +57,10 @@ func main() {
 	fmt.Println("Connection success")
 
 	// setup handlers
-
+	// /list should not work or should i register both paths?
 	http.HandleFunc("/list/", func(w http.ResponseWriter, r *http.Request) {
 
 		handleItems(db, w, r)
-	})
-
-	http.HandleFunc("/list", func(w http.ResponseWriter, r *http.Request) {
-
-		handleItems(db, w, r)
-
 	})
 
 	/* simple query
@@ -60,15 +74,15 @@ func main() {
 		fmt.Println("found a record in the table HOORAY")
 	} */
 
-	fmt.Println("Server on 8080")
+	fmt.Println("Server on 8080, http://localhost:8080/list")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 
 }
 
 /*
-table name is list
-database name is todoapi
-host is from cat /etc/resolv.conf if via ip
+ table name is list
+ database name is todoapi
+ host is from cat /etc/resolv.conf if via ip
 */
 
 func setupDB() (*sql.DB, error) {
@@ -76,13 +90,50 @@ func setupDB() (*sql.DB, error) {
 	return sql.Open("postgres", connStr)
 }
 
+// disable /list route and confine routes to /list/ ?
 // CRUD function
 func handleItems(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// to-do, doing, completed as status
+	// log.Println(r.Method)
 	switch r.Method {
+	// implement filter by status and due date
 	case "GET":
+
+		//single retrieve
+		id := strings.TrimPrefix(r.URL.Path, "/list/")
+		if id != "" {
+			_, err := uuid.Parse(id)
+			if err != nil {
+				http.Error(w, "Invalid UUID", http.StatusBadRequest)
+				return
+			}
+
+			var item Item
+			err = db.QueryRow("SELECT * FROM list WHERE id = $1", id).Scan(
+				&item.ID,
+				&item.Title,
+				&item.Description,
+				&item.StatusField,
+				&item.DueDate,
+				&item.CreatedAt,
+				&item.UpdatedAt,
+			)
+
+			if err == sql.ErrNoRows {
+				http.Error(w, "Item not found", http.StatusNotFound)
+				return
+			}
+
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			json.NewEncoder(w).Encode(item)
+			return
+		}
 
 		sortBy := r.URL.Query().Get("sort")
 		orderBy := r.URL.Query().Get("order")
@@ -130,7 +181,18 @@ func handleItems(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(items)
 
+		// create
+		// can update by post request, maybe reject if there is trailing id present
+		// has issues
 	case "POST":
+
+		// check path properly
+		if r.URL.Path != "/list/" {
+			http.Error(w, "Invalid path", http.StatusNotFound)
+			//log.Println("171")
+			return
+		}
+
 		var item Item
 		if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -144,6 +206,7 @@ func handleItems(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 		if item.Description == "" {
 			http.Error(w, "Description Required", http.StatusBadRequest)
+			return
 		}
 
 		if item.DueDate != nil {
@@ -180,6 +243,8 @@ func handleItems(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(item)
 
+		// update and implement partial update
+		// partial update kind of works but will set empty fields to null in json RAW
 	case "PUT":
 		id := strings.TrimPrefix(r.URL.Path, "/list/")
 		if id == "" {
@@ -206,6 +271,7 @@ func handleItems(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
 		if !exists {
 			http.Error(w, "Item not found", http.StatusNotFound)
 			return
@@ -251,6 +317,12 @@ func handleItems(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		_, err := uuid.Parse(id)
+		if err != nil {
+			http.Error(w, "invalid UUID", http.StatusBadRequest)
+			return
+		}
+
 		result, err := db.Exec("DELETE FROM list WHERE id = $1", id)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -264,7 +336,7 @@ func handleItems(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		}
 
 		if rowsAffected == 0 {
-			http.Error(w, "User not found", http.StatusNotFound)
+			http.Error(w, "Todo not found", http.StatusNotFound)
 			return
 		}
 
